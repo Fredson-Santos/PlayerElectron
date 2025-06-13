@@ -1,7 +1,7 @@
 // renderer.js - Lógica do Frontend (Processo de Renderização) - ATUALIZADO
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Referências aos elementos da UI (sem alteração)
+    // Referências aos elementos da UI
     const loginScreen = document.getElementById('login-screen');
     const mainScreen = document.getElementById('main-screen');
     const playerScreen = document.getElementById('player-screen');
@@ -20,14 +20,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const videoPlayer = document.getElementById('video-player');
     const backToMainBtn = document.getElementById('back-to-main');
     const playerFeedback = document.getElementById('player-feedback');
+    // NOVOS Elementos para o Modal de Séries
+    const seriesInfoModal = document.getElementById('series-info-modal');
+    const seriesModalTitle = document.getElementById('series-modal-title');
+    const seriesModalContent = document.getElementById('series-modal-content');
+    const closeSeriesModalBtn = document.getElementById('close-series-modal');
 
-    // Estado da aplicação (sem alteração)
+
+    // Estado da aplicação
     let state = {
         api: null,
         userInfo: null,
         categories: [],
         currentContent: [],
         favorites: JSON.parse(localStorage.getItem('iptv_favorites')) || {},
+        watched: JSON.parse(localStorage.getItem('iptv_watched')) || [], // NOVO: Armazena IDs de episódios vistos
         currentSection: 'live',
         currentCategory: null,
         currentStream: null,
@@ -81,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const handleLogout = () => {
-        state = { ...state, api: null, userInfo: null, categories: [], currentContent: [], currentSection: 'live', currentCategory: null };
+        state = { ...state, api: null, userInfo: null, categories: [], currentContent: [], currentSection: 'live', currentCategory: null, watched: state.watched }; // Mantém os 'vistos'
         if (!rememberMeCheckbox.checked) {
             localStorage.removeItem('iptv_credentials');
             hostInput.value = '';
@@ -92,10 +99,11 @@ document.addEventListener('DOMContentLoaded', () => {
         mainScreen.classList.add('hidden');
         loginScreen.classList.remove('hidden');
         playerScreen.classList.add('hidden');
+        seriesInfoModal.classList.add('hidden');
         stopPlayer();
     };
 
-    // --- BUSCA E RENDERIZAÇÃO DE CONTEÚDO (sem alteração na lógica, apenas na renderItems) ---
+    // --- BUSCA E RENDERIZAÇÃO DE CONTEÚDO ---
     const fetchAndRenderCategories = async () => {
         showLoading(true);
         state.currentContent = [];
@@ -156,14 +164,19 @@ document.addEventListener('DOMContentLoaded', () => {
             li.addEventListener('click', () => handleCategoryClick(id));
             return li;
         };
-        categoryList.appendChild(createCategoryElement('Todos', 'all'));
-        categoryList.appendChild(createCategoryElement('⭐ Favoritos', 'favorites'));
+        // A categoria Favoritos não se aplica a séries da mesma forma, então é ocultada nessa seção.
+        if (state.currentSection !== 'series') {
+            categoryList.appendChild(createCategoryElement('Todos', 'all'));
+            categoryList.appendChild(createCategoryElement('⭐ Favoritos', 'favorites'));
+        } else {
+            categoryList.appendChild(createCategoryElement('Todas', 'all'));
+        }
+
         (state.categories || []).forEach(cat => {
             categoryList.appendChild(createCategoryElement(cat.category_name, cat.category_id));
         });
     };
 
-    // ===== FUNÇÃO MODIFICADA PARA A NOVA INTERFACE =====
     const renderItems = (items) => {
         contentGrid.innerHTML = '';
         if (!items || items.length === 0) {
@@ -178,7 +191,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const card = document.createElement('div');
             card.dataset.id = item.stream_id || item.series_id;
             
-            // Seção "Ao Vivo" continua com o layout de lista com imagens
             if (state.currentSection === 'live') {
                 card.className = 'flex items-center bg-gray-800 rounded-lg p-2 cursor-pointer transition-colors hover:bg-gray-700';
                 const iconUrl = item.stream_icon || 'https://placehold.co/160x90/1f2937/FFF?text=?';
@@ -186,19 +198,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     <img src="${iconUrl}" alt="${item.name}" class="w-20 h-12 object-contain mr-4 flex-shrink-0 bg-black/20 rounded-md" onerror="this.onerror=null;this.src='https://placehold.co/160x90/1f2937/FFF?text=${encodeURIComponent(item.name ? item.name[0] : '?')}';">
                     <h3 class="text-sm font-semibold text-white truncate">${item.name}</h3>
                 `;
-                card.addEventListener('click', () => handleItemClick(item));
-
             } else { 
-                // NOVO: Layout de banner SOMENTE TEXTO para Filmes e Séries
                 card.className = 'flex items-center justify-center text-center bg-gray-800 rounded-lg p-3 cursor-pointer h-36 transition-colors hover:bg-gray-700';
-                
-                // Exibe apenas o nome do item. Toda a lógica de imagens, notas e favoritos foi removida temporariamente.
                 card.innerHTML = `
                     <h3 class="text-sm font-semibold text-white">${item.name || 'Sem nome'}</h3>
                 `;
-                card.addEventListener('click', () => handleItemClick(item));
             }
-            
+            card.addEventListener('click', () => handleItemClick(item));
             fragment.appendChild(card);
         });
         contentGrid.appendChild(fragment);
@@ -216,7 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const updateActiveCategoryUI = () => {
          document.querySelectorAll('#category-list li').forEach(li => {
             li.classList.remove('bg-cyan-600');
-            if (li.dataset.category === state.currentCategory) {
+            if (li.dataset.category === String(state.currentCategory)) {
                 li.classList.add('bg-cyan-600');
             }
         });
@@ -230,40 +236,19 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelector(`button[data-section="${section}"]`).classList.add('active');
             searchBox.value = '';
 
-            // Adiciona a classe correta ao contêiner da grade
             contentGrid.classList.remove('grid-view-detailed', 'grid-view-list');
             if (section === 'live') {
                 contentGrid.classList.add('grid-view-list');
             } else {
-                contentGrid.classList.add('grid-view-detailed'); // Classe renomeada de 'grid-view-posters'
+                contentGrid.classList.add('grid-view-detailed');
             }
-            
-            if (state.currentSection === 'live') {
-                showLoading(true);
-                const { username, password } = state.userInfo;
-                try {
-                    const catRes = await state.api.get('/player_api.php', { params: { username, password, action: 'get_live_categories' } });
-                    state.categories = catRes.data || [];
-                    renderCategories();
-                    await fetchContentForCategory('all');
-                } catch (error) {
-                    console.error("Erro ao carregar seção Ao Vivo:", error);
-                    contentGrid.innerHTML = '<p class="col-span-full text-center text-gray-400">Falha ao carregar canais.</p>';
-                } finally {
-                    showLoading(false);
-                }
-            } else {
-                await fetchAndRenderCategories();
-            }
+            await fetchAndRenderCategories();
         }
     };
     
     const handleSearch = (e) => {
         clearTimeout(state.debounceTimeout);
         const filter = e.target.value.toLowerCase().trim();
-        if (state.currentContent.length === 0 && filter) {
-            return;
-        }
         state.debounceTimeout = setTimeout(() => {
             if (!filter) {
                 renderItems(state.currentContent);
@@ -276,35 +261,123 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 300);
     };
 
-    // --- LÓGICA DO PLAYER (sem alteração) ---
+    // --- LÓGICA DE SÉRIES (NOVA) ---
+    const showSeriesInfo = async (series) => {
+        showLoading(true);
+        seriesModalContent.innerHTML = '';
+        const { username, password } = state.userInfo;
+        try {
+            const res = await state.api.get('/player_api.php', {
+                params: { username, password, action: 'get_series_info', series_id: series.series_id }
+            });
+            const seriesData = res.data;
+            seriesModalTitle.textContent = series.name;
+            renderSeriesSeasons(seriesData.episodes);
+            seriesInfoModal.classList.remove('hidden');
+        } catch (error) {
+            console.error('Erro ao buscar informações da série:', error);
+            alert('Não foi possível carregar os detalhes da série.');
+        } finally {
+            showLoading(false);
+        }
+    };
+
+    const renderSeriesSeasons = (seasons) => {
+        const fragment = document.createDocumentFragment();
+        const seasonNumbers = Object.keys(seasons).sort((a, b) => parseInt(a) - parseInt(b));
+
+        seasonNumbers.forEach(seasonNum => {
+            const seasonContainer = document.createElement('div');
+            seasonContainer.className = 'mb-6';
+            
+            const seasonTitle = document.createElement('h3');
+            seasonTitle.className = 'text-lg font-semibold text-cyan-400 mb-3';
+            seasonTitle.textContent = `Temporada ${seasonNum}`;
+            seasonContainer.appendChild(seasonTitle);
+
+            const episodesList = document.createElement('ul');
+            episodesList.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2';
+            
+            seasons[seasonNum].forEach(episode => {
+                const isWatched = state.watched.includes(episode.id);
+                const li = document.createElement('li');
+                li.className = `p-2 rounded cursor-pointer transition-colors ${
+                    isWatched 
+                        ? 'bg-gray-700 text-gray-500 hover:bg-gray-600'
+                        : 'bg-gray-900 hover:bg-gray-700'
+                }`;
+                li.textContent = `${episode.episode_num}. ${episode.title || 'Episódio sem título'}`;
+                if (isWatched) {
+                    li.textContent += ' ✓';
+                }
+                li.addEventListener('click', () => {
+                    playEpisode(episode);
+                });
+                episodesList.appendChild(li);
+            });
+            seasonContainer.appendChild(episodesList);
+            fragment.appendChild(seasonContainer);
+        });
+        seriesModalContent.appendChild(fragment);
+    };
+
+    const closeSeriesModal = () => {
+        seriesInfoModal.classList.add('hidden');
+        seriesModalContent.innerHTML = '';
+    };
+
+    // --- LÓGICA DO PLAYER ---
     const handleItemClick = (item) => {
+        // Rota modificada para séries
         if (state.currentSection === 'series') {
-            alert('A reprodução de séries requer uma tela de seleção de episódios (não implementada).');
+            showSeriesInfo(item);
             return;
         }
-        const { username, password } = state.userInfo;
+
         const streamId = item.stream_id;
         const extension = item.container_extension || 'mp4';
-        const host = hostInput.value.trim();
-        let streamUrl;
-        if (state.currentSection === 'live') {
-            streamUrl = `${host}/live/${username}/${password}/${streamId}.m3u8`;
-        } else {
-            streamUrl = `${host}/movie/${username}/${password}/${streamId}.${extension}`;
-        }
-        state.currentStream = item;
-        playStream(streamUrl);
+        
+        playStream(streamId, extension, state.currentSection);
+    };
+
+    const playEpisode = (episode) => {
+        closeSeriesModal();
+        // O player precisa saber que o item atual é um episódio de série para marcar como visto.
+        state.currentStream = { ...episode, type: 'series' };
+        playStream(episode.id, episode.container_extension, 'series');
     };
     
-    const playStream = (url) => {
-        stopPlayer();
+    const playStream = (streamId, extension, type) => {
+        stopPlayer(); // Para garantir que players anteriores sejam destruídos
         mainScreen.classList.add('hidden');
         playerScreen.classList.remove('hidden');
         showLoading(true);
-        if (url.includes('.m3u8')) {
+
+        const { username, password } = state.userInfo;
+        const host = hostInput.value.trim();
+        let streamUrl;
+
+        switch(type) {
+            case 'live':
+                streamUrl = `${host}/live/${username}/${password}/${streamId}.m3u8`;
+                break;
+            case 'movie':
+                streamUrl = `${host}/movie/${username}/${password}/${streamId}.${extension}`;
+                break;
+            case 'series':
+                streamUrl = `${host}/series/${username}/${password}/${streamId}.${extension}`;
+                break;
+        }
+        
+        // Se o item não for um episódio, guarde-o no estado
+        if (type !== 'series') {
+            state.currentStream = state.currentContent.find(c => c.stream_id === streamId);
+        }
+
+        if (streamUrl.includes('.m3u8')) {
             if (Hls.isSupported()) {
                 state.hls = new Hls();
-                state.hls.loadSource(url);
+                state.hls.loadSource(streamUrl);
                 state.hls.attachMedia(videoPlayer);
                 state.hls.on(Hls.Events.MANIFEST_PARSED, () => { videoPlayer.play(); showLoading(false); });
                 state.hls.on(Hls.Events.ERROR, (event, data) => {
@@ -316,12 +389,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-                videoPlayer.src = url;
+                videoPlayer.src = streamUrl;
                 videoPlayer.addEventListener('loadedmetadata', () => { videoPlayer.play(); showLoading(false); });
             }
         } else {
-            videoPlayer.src = url;
-            videoPlayer.play();
+            videoPlayer.src = streamUrl;
+            videoPlayer.play().catch(e => console.error("Erro ao reproduzir:", e));
             showLoading(false);
         }
         playerScreen.focus();
@@ -335,11 +408,15 @@ document.addEventListener('DOMContentLoaded', () => {
         videoPlayer.pause();
         videoPlayer.removeAttribute('src');
         videoPlayer.load();
-        state.currentStream = null;
     };
     
     const closePlayer = () => {
+        // NOVO: Marca o episódio como visto ao fechar o player
+        if (state.currentStream && state.currentStream.type === 'series') {
+            markAsWatched(state.currentStream.id);
+        }
         stopPlayer();
+        state.currentStream = null; // Limpa o stream atual
         playerScreen.classList.add('hidden');
         mainScreen.classList.remove('hidden');
         renderItems(state.currentContent);
@@ -353,8 +430,11 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'ArrowLeft': videoPlayer.currentTime -= 10; showFeedback('« -10s'); break;
             case 't': case 'T': window.electronAPI.toggleFullscreen(); break;
             case 'f': case 'F':
-                toggleFavorite(state.currentStream);
-                showFeedback(isFavorite(state.currentStream) ? '⭐ Adicionado' : '⭐ Removido');
+                // Favoritar não se aplica a episódios individuais desta forma.
+                if (state.currentSection !== 'series') {
+                    toggleFavorite(state.currentStream);
+                    showFeedback(isFavorite(state.currentStream) ? '⭐ Adicionado' : '⭐ Removido');
+                }
                 break;
             case 'Escape': closePlayer(); break;
         }
@@ -368,8 +448,14 @@ document.addEventListener('DOMContentLoaded', () => {
         feedbackTimeout = setTimeout(() => { playerFeedback.style.opacity = '0'; }, 1000);
     };
 
-    // --- LÓGICA DE FAVORITOS (com atualização da UI) ---
-    
+    // --- LÓGICA DE FAVORITOS E VISTOS ---
+    const markAsWatched = (episodeId) => {
+        if (!state.watched.includes(episodeId)) {
+            state.watched.push(episodeId);
+            localStorage.setItem('iptv_watched', JSON.stringify(state.watched));
+        }
+    };
+
     const isFavorite = (item) => {
         if (!item) return false;
         const id = item.stream_id || item.series_id;
@@ -391,7 +477,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const actionMap = {
             live: 'get_live_streams',
             movie: 'get_vod_streams',
-            series: 'get_series',
         };
         const params = { username, password, action: actionMap[state.currentSection] };
         try {
@@ -407,40 +492,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    // ===== FUNÇÃO MODIFICADA PARA A NOVA INTERFACE =====
     const toggleFavorite = (item) => {
         if (!item) return;
         const id = item.stream_id || item.series_id;
         const type = state.currentSection;
-        
-        if (!state.favorites[type]) {
-            state.favorites[type] = [];
-        }
+        if (!state.favorites[type]) state.favorites[type] = [];
 
-        let isNowFavorite = false;
         const index = state.favorites[type].indexOf(id);
         if (index > -1) {
             state.favorites[type].splice(index, 1);
-            isNowFavorite = false;
         } else {
             state.favorites[type].push(id);
-            isNowFavorite = true;
         }
-        
         localStorage.setItem('iptv_favorites', JSON.stringify(state.favorites));
-        
-        // Atualiza apenas o ícone do card clicado, sem recarregar tudo
-        const card = contentGrid.querySelector(`.content-card[data-id='${id}']`);
-        if (card) {
-            const favButton = card.querySelector('.fav-button');
-            if (favButton) {
-                favButton.innerHTML = isNowFavorite 
-                    ? '<span class="text-red-500">♥</span>' 
-                    : '<span class="text-white">♡</span>';
-            }
-        }
 
-        // Se estiver na tela de favoritos, recarrega para remover o item
         if (state.currentCategory === 'favorites' && playerScreen.classList.contains('hidden')) {
             showFavorites();
         }
@@ -458,9 +523,15 @@ document.addEventListener('DOMContentLoaded', () => {
     searchBox.addEventListener('input', handleSearch);
     backToMainBtn.addEventListener('click', closePlayer);
     playerScreen.addEventListener('keydown', handlePlayerKeys);
+    // NOVOS Listeners
+    closeSeriesModalBtn.addEventListener('click', closeSeriesModal);
     
     window.addEventListener('keydown', (e) => {
         if (e.key === ' ' && e.target === document.body) e.preventDefault();
+        // Fecha o modal de séries com a tecla Escape
+        if (e.key === 'Escape' && !seriesInfoModal.classList.contains('hidden')) {
+            closeSeriesModal();
+        }
     });
 
     // Inicia a aplicação
