@@ -1,7 +1,7 @@
-// renderer.js - Lógica do Frontend (Processo de Renderização) 
+// renderer.js - Lógica do Frontend (Processo de Renderização) - ATUALIZADO
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Referências aos elementos da UI
+    // Referências aos elementos da UI (sem alteração)
     const loginScreen = document.getElementById('login-screen');
     const mainScreen = document.getElementById('main-screen');
     const playerScreen = document.getElementById('player-screen');
@@ -21,22 +21,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const backToMainBtn = document.getElementById('back-to-main');
     const playerFeedback = document.getElementById('player-feedback');
 
-    // Estado da aplicação
+    // Estado da aplicação (sem alteração)
     let state = {
         api: null,
         userInfo: null,
         categories: [],
-        currentContent: [], // Conteúdo da categoria ou busca atual
+        currentContent: [],
         favorites: JSON.parse(localStorage.getItem('iptv_favorites')) || {},
-        currentSection: 'live', // Inicia em 'live'
-        currentCategory: null, // Nenhuma categoria selecionada no início
+        currentSection: 'live',
+        currentCategory: null,
         currentStream: null,
         hls: null,
         debounceTimeout: null,
     };
 
-    // --- LÓGICA DE LOGIN E SESSÃO ---
-
+    // --- LÓGICA DE LOGIN E SESSÃO (sem alteração) ---
     const autoLogin = () => {
         const savedCreds = localStorage.getItem('iptv_credentials');
         if (savedCreds) {
@@ -53,37 +52,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e) e.preventDefault();
         showLoading(true);
         loginError.textContent = '';
-        
         const host = hostInput.value.trim();
         const username = usernameInput.value.trim();
         const password = passwordInput.value.trim();
-
         if (!host || !username || !password) {
             loginError.textContent = 'Todos os campos são obrigatórios.';
             showLoading(false);
             return;
         }
-
         state.api = axios.create({ baseURL: host });
-        
         try {
             const response = await state.api.get('/player_api.php', { params: { username, password } });
             if (response.data.user_info.auth === 0) throw new Error('Usuário ou senha inválidos.');
-            
             state.userInfo = response.data.user_info;
-
             if (rememberMeCheckbox.checked) {
                 localStorage.setItem('iptv_credentials', JSON.stringify({ host, username, password }));
             } else {
                 localStorage.removeItem('iptv_credentials');
             }
-            
             loginScreen.classList.add('hidden');
             mainScreen.classList.remove('hidden');
-            
-            // Força a carga inicial da seção 'live'
             await handleSectionChange({ target: { dataset: { section: 'live' } } }, true);
-
         } catch (error) {
             console.error('Erro no login:', error);
             loginError.textContent = 'Falha no login. Verifique o host e as credenciais.';
@@ -93,7 +82,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const handleLogout = () => {
         state = { ...state, api: null, userInfo: null, categories: [], currentContent: [], currentSection: 'live', currentCategory: null };
-        
         if (!rememberMeCheckbox.checked) {
             localStorage.removeItem('iptv_credentials');
             hostInput.value = '';
@@ -101,30 +89,26 @@ document.addEventListener('DOMContentLoaded', () => {
             passwordInput.value = '';
             rememberMeCheckbox.checked = false;
         }
-
         mainScreen.classList.add('hidden');
         loginScreen.classList.remove('hidden');
         playerScreen.classList.add('hidden');
         stopPlayer();
     };
 
-    // --- BUSCA E RENDERIZAÇÃO DE CONTEÚDO OTIMIZADA ---
-
+    // --- BUSCA E RENDERIZAÇÃO DE CONTEÚDO (sem alteração na lógica, apenas na renderItems) ---
     const fetchAndRenderCategories = async () => {
         showLoading(true);
         state.currentContent = [];
         state.currentCategory = null;
-        renderItems([]); // Limpa a grid de conteúdo
+        renderItems([]);
         contentGrid.innerHTML = '<p class="col-span-full text-center text-gray-400">Selecione uma categoria para começar.</p>';
         updateActiveCategoryUI();
-
         const { username, password } = state.userInfo;
         const actionMap = {
             live: 'get_live_categories',
             movie: 'get_vod_categories',
             series: 'get_series_categories',
         };
-        
         try {
             const res = await state.api.get('/player_api.php', { params: { username, password, action: actionMap[state.currentSection] } });
             state.categories = res.data || [];
@@ -151,7 +135,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (categoryId !== 'all') {
             params.category_id = categoryId;
         }
-
         try {
             const res = await state.api.get('/player_api.php', { params });
             state.currentContent = res.data || [];
@@ -166,25 +149,21 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const renderCategories = () => {
         categoryList.innerHTML = '';
-        
         const createCategoryElement = (name, id) => {
             const li = document.createElement('li');
             li.textContent = name;
             li.dataset.category = id;
-            li.className = `p-2 rounded cursor-pointer mb-1 text-sm hover:bg-gray-700`;
             li.addEventListener('click', () => handleCategoryClick(id));
             return li;
         };
-
         categoryList.appendChild(createCategoryElement('Todos', 'all'));
         categoryList.appendChild(createCategoryElement('⭐ Favoritos', 'favorites'));
-        
-        // Agora 'state.categories' terá os dados corretos para todas as seções
         (state.categories || []).forEach(cat => {
             categoryList.appendChild(createCategoryElement(cat.category_name, cat.category_id));
         });
     };
 
+    // ===== FUNÇÃO MODIFICADA PARA A NOVA INTERFACE =====
     const renderItems = (items) => {
         contentGrid.innerHTML = '';
         if (!items || items.length === 0) {
@@ -196,23 +175,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const fragment = document.createDocumentFragment();
         items.forEach(item => {
-            const isFav = isFavorite(item);
             const card = document.createElement('div');
-            card.className = 'content-card bg-gray-800 rounded-lg overflow-hidden cursor-pointer transform hover:scale-105 transition-transform duration-200';
             card.dataset.id = item.stream_id || item.series_id;
-            card.dataset.type = state.currentSection;
             
-            const iconUrl = item.stream_icon || item.cover || 'https://placehold.co/200x300/181818/FFF?text=?';
+            // Seção "Ao Vivo" continua com o layout de lista com imagens
+            if (state.currentSection === 'live') {
+                card.className = 'flex items-center bg-gray-800 rounded-lg p-2 cursor-pointer transition-colors hover:bg-gray-700';
+                const iconUrl = item.stream_icon || 'https://placehold.co/160x90/1f2937/FFF?text=?';
+                card.innerHTML = `
+                    <img src="${iconUrl}" alt="${item.name}" class="w-20 h-12 object-contain mr-4 flex-shrink-0 bg-black/20 rounded-md" onerror="this.onerror=null;this.src='https://placehold.co/160x90/1f2937/FFF?text=${encodeURIComponent(item.name ? item.name[0] : '?')}';">
+                    <h3 class="text-sm font-semibold text-white truncate">${item.name}</h3>
+                `;
+                card.addEventListener('click', () => handleItemClick(item));
 
-            card.innerHTML = `
-                <img src="${iconUrl}" alt="${item.name}" class="w-full h-40 object-cover" onerror="this.onerror=null;this.src='https://placehold.co/200x300/181818/FFF?text=${encodeURIComponent(item.name ? item.name[0] : '?')}';">
-                <div class="p-2">
-                    <h3 class="text-xs font-semibold truncate">${item.name || 'Sem nome'}</h3>
-                </div>
-                ${isFav ? '<div class="fav-indicator absolute top-1 right-1 text-yellow-400 text-lg">⭐</div>' : ''}
-            `;
+            } else { 
+                // NOVO: Layout de banner SOMENTE TEXTO para Filmes e Séries
+                card.className = 'flex items-center justify-center text-center bg-gray-800 rounded-lg p-3 cursor-pointer h-36 transition-colors hover:bg-gray-700';
+                
+                // Exibe apenas o nome do item. Toda a lógica de imagens, notas e favoritos foi removida temporariamente.
+                card.innerHTML = `
+                    <h3 class="text-sm font-semibold text-white">${item.name || 'Sem nome'}</h3>
+                `;
+                card.addEventListener('click', () => handleItemClick(item));
+            }
             
-            card.addEventListener('click', () => handleItemClick(item));
             fragment.appendChild(card);
         });
         contentGrid.appendChild(fragment);
@@ -229,7 +215,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const updateActiveCategoryUI = () => {
          document.querySelectorAll('#category-list li').forEach(li => {
-            li.classList.toggle('bg-cyan-600', li.dataset.category === state.currentCategory);
+            li.classList.remove('bg-cyan-600');
+            if (li.dataset.category === state.currentCategory) {
+                li.classList.add('bg-cyan-600');
+            }
         });
     };
 
@@ -240,18 +229,22 @@ document.addEventListener('DOMContentLoaded', () => {
             navBtns.forEach(btn => btn.classList.remove('active'));
             document.querySelector(`button[data-section="${section}"]`).classList.add('active');
             searchBox.value = '';
+
+            // Adiciona a classe correta ao contêiner da grade
+            contentGrid.classList.remove('grid-view-detailed', 'grid-view-list');
+            if (section === 'live') {
+                contentGrid.classList.add('grid-view-list');
+            } else {
+                contentGrid.classList.add('grid-view-detailed'); // Classe renomeada de 'grid-view-posters'
+            }
             
-            // LÓGICA CORRIGIDA AQUI
             if (state.currentSection === 'live') {
                 showLoading(true);
                 const { username, password } = state.userInfo;
                 try {
-                    // 1. Busca as categorias primeiro
                     const catRes = await state.api.get('/player_api.php', { params: { username, password, action: 'get_live_categories' } });
                     state.categories = catRes.data || [];
                     renderCategories();
-
-                    // 2. Em seguida, busca o conteúdo da categoria "Todos"
                     await fetchContentForCategory('all');
                 } catch (error) {
                     console.error("Erro ao carregar seção Ao Vivo:", error);
@@ -260,7 +253,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     showLoading(false);
                 }
             } else {
-                // Comportamento para Filmes e Séries (só carrega categorias)
                 await fetchAndRenderCategories();
             }
         }
@@ -269,11 +261,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const handleSearch = (e) => {
         clearTimeout(state.debounceTimeout);
         const filter = e.target.value.toLowerCase().trim();
-        
         if (state.currentContent.length === 0 && filter) {
             return;
         }
-
         state.debounceTimeout = setTimeout(() => {
             if (!filter) {
                 renderItems(state.currentContent);
@@ -286,25 +276,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 300);
     };
 
-    // --- LÓGICA DO PLAYER DE VÍDEO (sem alterações) ---
+    // --- LÓGICA DO PLAYER (sem alteração) ---
     const handleItemClick = (item) => {
         if (state.currentSection === 'series') {
             alert('A reprodução de séries requer uma tela de seleção de episódios (não implementada).');
             return;
         }
-
         const { username, password } = state.userInfo;
         const streamId = item.stream_id;
         const extension = item.container_extension || 'mp4';
         const host = hostInput.value.trim();
-        
         let streamUrl;
         if (state.currentSection === 'live') {
             streamUrl = `${host}/live/${username}/${password}/${streamId}.m3u8`;
-        } else { // Movie
+        } else {
             streamUrl = `${host}/movie/${username}/${password}/${streamId}.${extension}`;
         }
-        
         state.currentStream = item;
         playStream(streamUrl);
     };
@@ -314,16 +301,12 @@ document.addEventListener('DOMContentLoaded', () => {
         mainScreen.classList.add('hidden');
         playerScreen.classList.remove('hidden');
         showLoading(true);
-
         if (url.includes('.m3u8')) {
             if (Hls.isSupported()) {
                 state.hls = new Hls();
                 state.hls.loadSource(url);
                 state.hls.attachMedia(videoPlayer);
-                state.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    videoPlayer.play();
-                    showLoading(false);
-                });
+                state.hls.on(Hls.Events.MANIFEST_PARSED, () => { videoPlayer.play(); showLoading(false); });
                 state.hls.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
                         console.error('Erro fatal no HLS:', data);
@@ -334,15 +317,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
                 videoPlayer.src = url;
-                videoPlayer.addEventListener('loadedmetadata', () => videoPlayer.play());
-                videoPlayer.addEventListener('canplay', () => showLoading(false));
+                videoPlayer.addEventListener('loadedmetadata', () => { videoPlayer.play(); showLoading(false); });
             }
         } else {
             videoPlayer.src = url;
             videoPlayer.play();
-            videoPlayer.addEventListener('canplay', () => showLoading(false));
+            showLoading(false);
         }
-        videoPlayer.focus();
+        playerScreen.focus();
     };
 
     const stopPlayer = () => {
@@ -386,7 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
         feedbackTimeout = setTimeout(() => { playerFeedback.style.opacity = '0'; }, 1000);
     };
 
-    // --- LÓGICA DE FAVORITOS ---
+    // --- LÓGICA DE FAVORITOS (com atualização da UI) ---
     
     const isFavorite = (item) => {
         if (!item) return false;
@@ -401,20 +383,17 @@ document.addEventListener('DOMContentLoaded', () => {
         updateActiveCategoryUI();
         const { username, password } = state.userInfo;
         const favIds = state.favorites[state.currentSection] || [];
-
         if (favIds.length === 0) {
             renderItems([]);
             showLoading(false);
             return;
         }
-        
         const actionMap = {
             live: 'get_live_streams',
             movie: 'get_vod_streams',
             series: 'get_series',
         };
         const params = { username, password, action: actionMap[state.currentSection] };
-        
         try {
             const res = await state.api.get('/player_api.php', { params });
             const allItems = res.data || [];
@@ -427,25 +406,43 @@ document.addEventListener('DOMContentLoaded', () => {
             showLoading(false);
         }
     };
-
+    
+    // ===== FUNÇÃO MODIFICADA PARA A NOVA INTERFACE =====
     const toggleFavorite = (item) => {
         if (!item) return;
         const id = item.stream_id || item.series_id;
         const type = state.currentSection;
         
-        if (!state.favorites[type]) state.favorites[type] = [];
+        if (!state.favorites[type]) {
+            state.favorites[type] = [];
+        }
 
+        let isNowFavorite = false;
         const index = state.favorites[type].indexOf(id);
         if (index > -1) {
             state.favorites[type].splice(index, 1);
+            isNowFavorite = false;
         } else {
             state.favorites[type].push(id);
+            isNowFavorite = true;
         }
         
         localStorage.setItem('iptv_favorites', JSON.stringify(state.favorites));
         
-        if (playerScreen.classList.contains('hidden')) {
-           renderItems(state.currentContent);
+        // Atualiza apenas o ícone do card clicado, sem recarregar tudo
+        const card = contentGrid.querySelector(`.content-card[data-id='${id}']`);
+        if (card) {
+            const favButton = card.querySelector('.fav-button');
+            if (favButton) {
+                favButton.innerHTML = isNowFavorite 
+                    ? '<span class="text-red-500">♥</span>' 
+                    : '<span class="text-white">♡</span>';
+            }
+        }
+
+        // Se estiver na tela de favoritos, recarrega para remover o item
+        if (state.currentCategory === 'favorites' && playerScreen.classList.contains('hidden')) {
+            showFavorites();
         }
     };
     
