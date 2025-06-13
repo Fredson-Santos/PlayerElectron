@@ -12,6 +12,7 @@ body {
     color: #f9fafb; /* text-gray-50 */
 }
 
+
 /* Esconde a barra de rolagem mas permite rolar */
 .overflow-y-auto::-webkit-scrollbar {
     width: 8px;
