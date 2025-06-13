@@ -1,0 +1,57 @@
+/* style.css - Folha de estilos para o aplicativo */
+
+/* Importa Tailwind via CDN (alternativa ao build process) */
+@import url('https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css');
+
+/* Estilos personalizados */
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Esconde a barra de rolagem mas permite rolar */
+.overflow-y-auto::-webkit-scrollbar {
+    width: 8px;
+}
+.overflow-y-auto::-webkit-scrollbar-track {
+    background: #2d3748; /* bg-gray-700 */
+}
+.overflow-y-auto::-webkit-scrollbar-thumb {
+    background: #4a5568; /* bg-gray-600 */
+    border-radius: 4px;
+}
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: #718096; /* bg-gray-500 */
+}
+
+/* Estilo do botão de navegação ativo */
+.nav-btn.active {
+    background-color: #0891b2; /* bg-cyan-600 */
+    color: white;
+    font-weight: 600;
+}
+.nav-btn {
+    transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+}
+.nav-btn:not(.active):hover {
+    background-color: #374151; /* bg-gray-700 */
+}
+
+/* Foco visível para acessibilidade */
+input:focus, button:focus, .content-card:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.5); /* ring-cyan-500 com opacidade */
+}
+.content-card:focus {
+    transform: scale(1.05);
+}
+
+/* Indicador de favorito */
+.content-card {
+    position: relative;
+}
+
+.fav-indicator {
+    text-shadow: 0 0 4px black;
+}
