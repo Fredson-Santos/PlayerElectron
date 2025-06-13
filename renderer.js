@@ -1,4 +1,4 @@
-// renderer.js - Lógica do Frontend (Processo de Renderização) - OTIMIZADA
+// renderer.js - Lógica do Frontend (Processo de Renderização) 
 
 document.addEventListener('DOMContentLoaded', () => {
     // Referências aos elementos da UI
@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentContent: [], // Conteúdo da categoria ou busca atual
         favorites: JSON.parse(localStorage.getItem('iptv_favorites')) || {},
         currentSection: 'live', // Inicia em 'live'
-        currentCategory: 'all',
+        currentCategory: null, // Nenhuma categoria selecionada no início
         currentStream: null,
         hls: null,
         debounceTimeout: null,
@@ -81,19 +81,18 @@ document.addEventListener('DOMContentLoaded', () => {
             loginScreen.classList.add('hidden');
             mainScreen.classList.remove('hidden');
             
-            // Em vez de carregar TODO o conteúdo, carregamos apenas as categorias da primeira seção
-            await fetchAndRenderCategories();
+            // Força a carga inicial da seção 'live'
+            await handleSectionChange({ target: { dataset: { section: 'live' } } }, true);
 
         } catch (error) {
             console.error('Erro no login:', error);
             loginError.textContent = 'Falha no login. Verifique o host e as credenciais.';
-        } finally {
             showLoading(false);
         }
     };
 
     const handleLogout = () => {
-        state = { ...state, api: null, userInfo: null, categories: [], currentContent: [], currentSection: 'live' };
+        state = { ...state, api: null, userInfo: null, categories: [], currentContent: [], currentSection: 'live', currentCategory: null };
         
         if (!rememberMeCheckbox.checked) {
             localStorage.removeItem('iptv_credentials');
@@ -111,12 +110,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- BUSCA E RENDERIZAÇÃO DE CONTEÚDO OTIMIZADA ---
 
-    /**
-     * Busca as categorias para a seção atual (live, movie, series) e as renderiza.
-     */
     const fetchAndRenderCategories = async () => {
         showLoading(true);
-        contentGrid.innerHTML = '';
+        state.currentContent = [];
+        state.currentCategory = null;
+        renderItems([]); // Limpa a grid de conteúdo
+        contentGrid.innerHTML = '<p class="col-span-full text-center text-gray-400">Selecione uma categoria para começar.</p>';
+        updateActiveCategoryUI();
+
         const { username, password } = state.userInfo;
         const actionMap = {
             live: 'get_live_categories',
@@ -128,23 +129,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await state.api.get('/player_api.php', { params: { username, password, action: actionMap[state.currentSection] } });
             state.categories = res.data || [];
             renderCategories();
-            // Após renderizar as categorias, carrega o conteúdo da categoria "Todos"
-            await fetchContentForCategory('all');
         } catch (error) {
             console.error('Erro ao buscar categorias:', error);
-            contentGrid.innerHTML = '<p class="col-span-full text-center text-gray-400">Falha ao carregar categorias.</p>';
+            categoryList.innerHTML = '<li>Falha ao carregar.</li>'
         } finally {
             showLoading(false);
         }
     };
 
-    /**
-     * Busca o conteúdo para uma categoria específica ou todos os itens da seção.
-     * @param {string} categoryId - O ID da categoria ('all' para todas).
-     */
     const fetchContentForCategory = async (categoryId) => {
         showLoading(true);
         state.currentCategory = categoryId;
+        updateActiveCategoryUI();
         const { username, password } = state.userInfo;
         const actionMap = {
             live: 'get_live_streams',
@@ -168,9 +164,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    /**
-     * Renderiza a lista de categorias na barra lateral.
-     */
     const renderCategories = () => {
         categoryList.innerHTML = '';
         
@@ -186,22 +179,18 @@ document.addEventListener('DOMContentLoaded', () => {
         categoryList.appendChild(createCategoryElement('Todos', 'all'));
         categoryList.appendChild(createCategoryElement('⭐ Favoritos', 'favorites'));
         
-        state.categories.forEach(cat => {
+        // Agora 'state.categories' terá os dados corretos para todas as seções
+        (state.categories || []).forEach(cat => {
             categoryList.appendChild(createCategoryElement(cat.category_name, cat.category_id));
         });
-        
-        // Ativa a categoria atual
-        updateActiveCategoryUI();
     };
 
-    /**
-     * Renderiza os itens (canais/filmes/séries) na grid principal.
-     * @param {object[]} items - Array de itens para renderizar.
-     */
     const renderItems = (items) => {
         contentGrid.innerHTML = '';
         if (!items || items.length === 0) {
-            contentGrid.innerHTML = '<p class="col-span-full text-center text-gray-400">Nenhum item encontrado.</p>';
+            if (state.currentCategory) {
+                contentGrid.innerHTML = '<p class="col-span-full text-center text-gray-400">Nenhum item encontrado nesta categoria.</p>';
+            }
             return;
         }
 
@@ -232,56 +221,72 @@ document.addEventListener('DOMContentLoaded', () => {
     const handleCategoryClick = async (categoryId) => {
         searchBox.value = '';
         if (categoryId === 'favorites') {
-            showFavorites();
+            await showFavorites();
         } else {
             await fetchContentForCategory(categoryId);
         }
-        updateActiveCategoryUI();
     };
     
     const updateActiveCategoryUI = () => {
          document.querySelectorAll('#category-list li').forEach(li => {
             li.classList.toggle('bg-cyan-600', li.dataset.category === state.currentCategory);
-            if(li.dataset.category !== state.currentCategory) li.classList.remove('bg-cyan-600');
         });
     };
 
-    const handleSectionChange = async (e) => {
+    const handleSectionChange = async (e, isInitialLoad = false) => {
         const section = e.target.dataset.section;
-        if (section && section !== state.currentSection) {
+        if (section && (section !== state.currentSection || isInitialLoad)) {
             state.currentSection = section;
             navBtns.forEach(btn => btn.classList.remove('active'));
-            e.target.classList.add('active');
+            document.querySelector(`button[data-section="${section}"]`).classList.add('active');
             searchBox.value = '';
-            await fetchAndRenderCategories();
+            
+            // LÓGICA CORRIGIDA AQUI
+            if (state.currentSection === 'live') {
+                showLoading(true);
+                const { username, password } = state.userInfo;
+                try {
+                    // 1. Busca as categorias primeiro
+                    const catRes = await state.api.get('/player_api.php', { params: { username, password, action: 'get_live_categories' } });
+                    state.categories = catRes.data || [];
+                    renderCategories();
+
+                    // 2. Em seguida, busca o conteúdo da categoria "Todos"
+                    await fetchContentForCategory('all');
+                } catch (error) {
+                    console.error("Erro ao carregar seção Ao Vivo:", error);
+                    contentGrid.innerHTML = '<p class="col-span-full text-center text-gray-400">Falha ao carregar canais.</p>';
+                } finally {
+                    showLoading(false);
+                }
+            } else {
+                // Comportamento para Filmes e Séries (só carrega categorias)
+                await fetchAndRenderCategories();
+            }
         }
     };
     
-    /**
-     * Otimização de busca com Debounce para evitar excesso de renderizações.
-     */
     const handleSearch = (e) => {
         clearTimeout(state.debounceTimeout);
         const filter = e.target.value.toLowerCase().trim();
         
+        if (state.currentContent.length === 0 && filter) {
+            return;
+        }
+
         state.debounceTimeout = setTimeout(() => {
             if (!filter) {
-                // Se a busca for limpa, volta para a categoria que estava ativa
-                handleCategoryClick(state.currentCategory);
+                renderItems(state.currentContent);
                 return;
             }
-            // A busca funciona no conteúdo já carregado na `state.currentContent`
             const filteredItems = state.currentContent.filter(item => 
                 item.name && item.name.toLowerCase().includes(filter)
             );
             renderItems(filteredItems);
-             // Desativa a seleção de categoria durante a busca
-            document.querySelectorAll('#category-list li').forEach(li => li.classList.remove('bg-cyan-600'));
-        }, 300); // Atraso de 300ms
+        }, 300);
     };
 
-    // --- LÓGICA DO PLAYER DE VÍDEO (sem grandes alterações) ---
-
+    // --- LÓGICA DO PLAYER DE VÍDEO (sem alterações) ---
     const handleItemClick = (item) => {
         if (state.currentSection === 'series') {
             alert('A reprodução de séries requer uma tela de seleção de episódios (não implementada).');
@@ -355,7 +360,6 @@ document.addEventListener('DOMContentLoaded', () => {
         stopPlayer();
         playerScreen.classList.add('hidden');
         mainScreen.classList.remove('hidden');
-        // Re-renderiza para atualizar UI, como o indicador de favorito
         renderItems(state.currentContent);
     };
     
@@ -391,10 +395,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return state.favorites[type] && state.favorites[type].includes(id);
     };
     
-    /**
-     * Busca todos os itens da seção atual para poder filtrar os favoritos.
-     * Esta é uma operação pesada, usada somente quando o usuário clica em "Favoritos".
-     */
     const showFavorites = async () => {
         showLoading(true);
         state.currentCategory = 'favorites';
@@ -408,8 +408,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        // Para os favoritos, precisamos buscar a lista completa e depois filtrar.
-        // Isso é menos eficiente, mas muitas APIs não oferecem um endpoint para buscar múltiplos IDs.
         const actionMap = {
             live: 'get_live_streams',
             movie: 'get_vod_streams',
@@ -421,7 +419,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await state.api.get('/player_api.php', { params });
             const allItems = res.data || [];
             const favoriteItems = allItems.filter(item => favIds.includes(item.stream_id || item.series_id));
-            state.currentContent = favoriteItems; // Atualiza o conteúdo atual para a lista de favoritos
+            state.currentContent = favoriteItems;
             renderItems(favoriteItems);
         } catch (error) {
             console.error('Erro ao buscar favoritos:', error);
@@ -429,7 +427,6 @@ document.addEventListener('DOMContentLoaded', () => {
             showLoading(false);
         }
     };
-
 
     const toggleFavorite = (item) => {
         if (!item) return;
@@ -448,12 +445,10 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('iptv_favorites', JSON.stringify(state.favorites));
         
         if (playerScreen.classList.contains('hidden')) {
-           renderItems(state.currentContent); // Apenas re-renderiza os itens visíveis
+           renderItems(state.currentContent);
         }
     };
     
-    // --- FUNÇÕES UTILITÁRIAS ---
-
     const showLoading = (show) => {
         loadingSpinner.classList.toggle('hidden', !show);
     };
@@ -462,7 +457,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     loginForm.addEventListener('submit', handleLogin);
     logoutBtn.addEventListener('click', handleLogout);
-    navBtns.forEach(btn => btn.addEventListener('click', handleSectionChange));
+    navBtns.forEach(btn => btn.addEventListener('click', (e) => handleSectionChange(e)));
     searchBox.addEventListener('input', handleSearch);
     backToMainBtn.addEventListener('click', closePlayer);
     playerScreen.addEventListener('keydown', handlePlayerKeys);
